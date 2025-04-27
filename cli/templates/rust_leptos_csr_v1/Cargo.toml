@@ -1,0 +1,25 @@
+# templates/rust_leptos_csr_v1/Cargo.toml
+[package]
+name = "--crate-name-placeholder--"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"] # For WASM library output
+
+[dependencies]
+leptos = { version = "0.7", features = ["csr"] } # Specify CSR feature
+# Optional: Add leptos_router, leptos_meta if needed
+# leptos_router = { version = "0.7", features = ["csr"] }
+# leptos_meta = { version = "0.7", features = ["csr"] }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1" # Useful for debugging WASM panics
+
+# Consider dependencies needed by your actual app logic
+
+[profile.release]
+# Optimize for size in release builds for WASM
+opt-level = 'z'
+lto = true
+codegen-units = 1
+panic = 'abort'

@@ -1,0 +1,101 @@
+name: "Node.js Base v1"
+description: "Minimal Node.js/TypeScript project setup."
+language: nodejs
+variables:
+  - name: useOrgScope # New boolean variable
+    prompt: "Use organization scope (e.g., @your-org)?"
+    placeholderValue: "--use-org-scope-placeholder--" # Direct placeholder (rarely used)
+    varType: boolean # Specify type
+    default: "true" # Default is true
+  - name: orgScope
+    prompt: "Organization scope (e.g., @your-org - leave empty if not using scope)?"
+    placeholderValue: "--org-scope--" # Placeholder for scope value
+    default: "@your-org"
+    # Optional: Could add conditional prompt logic later
+  - name: projectName
+    prompt: "Enter the project name (e.g., My Cool Library):"
+    placeholderValue: "--TEMPLATE_PROJECT_NAME_PLACEHOLDER--"
+    default: "My Node Library"
+    transformations:
+      kebabCase: "--kebab-project-name--"
+      pascalCase: "--PascalProjectName--"
+  - name: projectDescription
+    prompt: "Enter a short description:"
+    placeholderValue: "--template-project-description--"
+    default: "A fantastic Node.js library"
+  - name: mainFileName
+    prompt: "Enter the main file base name (without extension):"
+    placeholderValue: "index_placeholder"
+    default: "main"
+    transformations:
+       pascalCase: "__PascalMainFileName__"
+  # Define the placeholder for the computed value. NO PROMPT.
+  - name: fullPackageName
+    prompt: null # Or omit prompt field entirely
+    placeholderValue: "--full-package-name--" # Target placeholder in package.json
+  - name: gitInit
+    prompt: "Initialize Git repository?"
+    placeholderValue: "--git-init-placeholder--" # Not used directly in files
+    varType: boolean
+    default: "true"
+  - name: includeDocker
+    prompt: "Include Docker configuration?"
+    placeholderValue: "--include-docker-placeholder--"
+    varType: boolean
+    default: "false"
+
+binaryExtensions: []
+placeholderFilenames:
+  prefix: "__VAR_" # Use this for filename substitution based on original var name
+  suffix: "__"
+
+conditionalPaths:
+  # Key is the relative path from template root
+  "Dockerfile": { variable: "includeDocker", value: "true" } # Include file if includeDocker is true
+  "docker-compose.yaml": { variable: "includeDocker" } # Include file if includeDocker is true (value defaults to "true")
+  "scripts/docker-build.sh": { variable: "includeDocker" }
+
+# --- Hooks ---
+preGenerate:
+  - name: "Print Welcome Message"
+    command: "echo '🚀 Starting generation for {{projectName}}...'" # Use {{varName}}
+  - name: "Check Node Exists (Pre)" # Example prerequisite check
+    command: "node --version"
+    ignoreErrors: false # Fail generation if node isn't found
+
+postGenerate:
+  - name: "Print Completion Message"
+    command: "echo '✅ Files generated for {{projectName}}!'"
+    workingDir: "." # Run inside the generated directory
+  - name: "Initialize Git Repo (Optional)"
+    # This command only runs if the user answered yes to gitInit
+    # We need conditional logic here, OR run it always and let git handle idempotency.
+    # Let's run it conditionally using shell logic for simplicity now.
+    # More complex logic might involve enhancing run_command or the config structure.
+    command: "if [ '{{gitInit}}' = 'true' ]; then git init && git add . && git commit -m 'Initial commit from Spawn Point'; else echo 'Skipping git init.'; fi"
+    workingDir: "." # Run inside the generated directory
+    ignoreErrors: true # Don't fail the whole process if git init fails
+
+validation:
+  testVariables:
+    useOrgScope: "true" # Test with scope
+    orgScope: "@test-org"
+    projectName: Test Validation Lib
+    projectDescription: "A library generated during validation"
+    mainFileName: test_main
+    includeDocker: "false" # Test WITHOUT docker files first
+  steps:
+    - name: "Check Node Version"
+      command: "node --version"
+    - name: "Check Package JSON Validity"
+      # Test validation should use the computed name based on testVariables
+      # Expected: @test-org/test-validation-lib
+      command: "node -e \"const pkg = require('./package.json'); if (pkg.name !== '@test-org/test-validation-lib') throw new Error('Name mismatch! Actual: ' + pkg.name); console.log('Package name ok ('+pkg.name+')');\""
+    - name: "Check Main File Content"
+      command: "cat test_main.js | grep 'TestValidationLib' && cat test_main.js | grep 'TestMain'"
+    - name: "Check Git NOT initialized"
+      command: "! git rev-parse --is-inside-work-tree" # Fails if inside a git repo
+    - name: "Check Dockerfile DOES NOT Exist"
+      command: "! test -f Dockerfile" # Command fails if Dockerfile exists
+    - name: "Check docker-compose DOES NOT Exist"
+      command: "! test -f docker-compose.yaml"

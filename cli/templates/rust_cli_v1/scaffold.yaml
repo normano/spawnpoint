@@ -1,0 +1,65 @@
+name: "Rust CLI App v1"
+description: "A basic command-line application written in Rust using Clap."
+language: rust
+variables:
+  - name: crateName # Name for the crate and binary
+    prompt: "Enter the crate/binary name (snake_case):"
+    placeholderValue: "--crate-name-placeholder--"
+    default: "my_rust_cli"
+    validationRegex: '^[a-z_][a-z0-9_]*$' # Basic snake_case validation
+    transformations:
+      pascalCase: "__PascalCrateName__" # For potential struct names
+  - name: crateDescription
+    prompt: "Enter a short description for the crate:"
+    placeholderValue: "--crate-description--"
+    default: "A cool Rust CLI application"
+  - name: authorName
+    prompt: "Author name:"
+    placeholderValue: "--author-name--"
+    default: "Your Name"
+  - name: authorEmail
+    prompt: "Author email:"
+    placeholderValue: "--author-email--"
+    default: "your.email@example.com"
+
+# Define files/extensions that shouldn't be substituted
+binaryExtensions: [] # None expected in this basic template
+
+# --- Optional: Define filename substitution ---
+placeholderFilenames:
+  prefix: "__VAR_"
+  suffix: "__"
+
+# --- Hooks ---
+postGenerate:
+  - name: "Format Code"
+    command: "cargo fmt"
+    workingDir: "." # Run inside generated directory
+    ignoreErrors: true # Formatting failure shouldn't stop generation
+  - name: "Initial Build (Debug)"
+    command: "cargo build"
+    workingDir: "."
+    ignoreErrors: true # Optional: Allow generation even if initial build fails
+
+# --- Validation ---
+validation:
+  testVariables:
+    crateName: test_cli_app
+    crateDescription: "A CLI app generated for validation"
+    authorName: "Test Author"
+    authorEmail: "test@example.com"
+  steps:
+    # Setup/Teardown not usually needed unless testing external interactions
+    - name: "Check Formatting"
+      command: "cargo fmt --check"
+    - name: "Clippy Lints"
+      command: "cargo clippy -- -D warnings" # Fail on warnings
+    - name: "Build Project"
+      command: "cargo build"
+      timeoutSecs: 120
+    - name: "Run Tests" # Template should include a basic test
+      command: "cargo test"
+      timeoutSecs: 60
+    - name: "Run Basic Command" # Check if the binary runs
+      # Note: Command uses {{varName}} from testVariables
+      command: "./target/debug/{{crateName}} --help"

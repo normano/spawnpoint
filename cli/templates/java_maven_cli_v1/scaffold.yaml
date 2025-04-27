@@ -1,0 +1,68 @@
+name: "Java Maven CLI App v1"
+description: "A basic Java command-line application using Maven."
+language: java
+variables:
+  - name: groupId
+    prompt: "Enter the Maven group ID (e.g., com.mycompany):"
+    placeholderValue: "com.example.placeholdergroup"
+    default: "com.example"
+    validationRegex: '^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$' # Basic Java package/group ID format
+  - name: artifactId
+    prompt: "Enter the Maven artifact ID (e.g., my-app):"
+    placeholderValue: "placeholder-artifact"
+    default: "my-java-app"
+    validationRegex: '^[a-z][a-z0-9-]*$' # Basic artifact ID format
+  - name: appVersion
+    prompt: "Initial application version:"
+    placeholderValue: "0.0.1-SNAPSHOT"
+    default: "1.0.0-SNAPSHOT"
+  - name: mainClassName
+    prompt: "Main class name (PascalCase):"
+    placeholderValue: "PlaceholderApp"
+    default: "App"
+    transformations:
+        # Used for directory structure below main/java/
+        # Assuming groupId is simple like com.example for path generation
+        # More complex groupId would need better path logic
+        packageName: "__placeholder_package_path__" # Used for filename placeholders
+  - name: javaVersion
+    prompt: "Java version (e.g., 11, 17, 21):"
+    placeholderValue: "11" # Placeholder in pom.xml
+    default: "17"
+
+binaryExtensions: []
+
+# Substitute package name in directory structure
+placeholderFilenames:
+  prefix: "__VAR_"
+  suffix: "__"
+
+# No pre-generate hooks needed
+
+postGenerate:
+  - name: "Maven Wrapper Setup (Optional)"
+    # This makes the project runnable without a globally installed Maven
+    command: "mvn -N wrapper:wrapper -Dmaven=3.9.6" # Specify a Maven version
+    workingDir: "."
+    ignoreErrors: true # Allow generation even if Maven isn't installed locally
+
+validation:
+  testVariables:
+    groupId: "com.testorg"
+    artifactId: "test-java-cli"
+    appVersion: "0.1.0-TEST"
+    mainClassName: "TestCliApp"
+    javaVersion: "17"
+    # packageName is derived/used implicitly by placeholderFilenames
+  steps:
+    - name: "Compile Project"
+      # Use Maven Wrapper if available, fallback to mvn
+      command: "./mvnw clean compile || mvn clean compile"
+      timeoutSecs: 180
+    - name: "Run Tests"
+      command: "./mvnw test || mvn test"
+      timeoutSecs: 90
+    - name: "Package Application (JAR)"
+      command: "./mvnw package || mvn package"
+      timeoutSecs: 60
+    # Could add a step to run the generated JAR if needed

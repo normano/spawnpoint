@@ -1,0 +1,43 @@
+# Basic docker-compose for development
+# Uses placeholders substituted by spawnpoint
+version: '3.8'
+
+services:
+  app:
+    # Build the image using the Dockerfile in the current directory (.)
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development # Use the development stage for hot-reloading etc.
+    container_name: --kebab-project-name--_dev # Use substituted name
+    ports:
+      # Map container port 3000 to host port 3000 (adjust if needed)
+      - "3000:3000"
+    volumes:
+      # Mount current directory into the container's workdir
+      # This allows for hot-reloading during development
+      # Note: node_modules is excluded to use container's version
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      # Set environment variables for development
+      - NODE_ENV=development
+      # Add other necessary environment variables
+      # - DATABASE_URL=postgresql://user:password@db:5432/mydatabase
+    # command: yarn start:dev # Override CMD for development specific start script
+
+  # Example of adding a database service
+  # db:
+  #   image: postgres:14-alpine
+  #   container_name: project_db_dev
+  #   environment:
+  #     POSTGRES_USER: user
+  #     POSTGRES_PASSWORD: password
+  #     POSTGRES_DB: mydatabase
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+# volumes:
+#   postgres_data:

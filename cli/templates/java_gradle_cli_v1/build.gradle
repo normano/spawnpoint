@@ -1,0 +1,52 @@
+plugins {
+    // Apply the application plugin to add support for building a CLI application in Java.
+    id 'application'
+}
+
+group = 'com.example.placeholdergroup' // Placeholder for group
+version = '0.0.1-SNAPSHOT' // Placeholder for version
+
+repositories {
+    // Use Maven Central for resolving dependencies.
+    mavenCentral()
+}
+
+java {
+    // Set the Java language level compatibility. Placeholder: 17
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+application {
+    // Define the main class for the application. Placeholders used.
+    mainClass = 'com.example.placeholdergroup.__package_name_path__.__PascalProjectName__'
+}
+
+dependencies {
+    // Use JUnit Jupiter for testing.
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+
+    // Add CLI parsing library (optional) - e.g., picocli
+    // implementation 'info.picocli:picocli:4.7.6'
+}
+
+// Configure the test task
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+}
+
+// Optional: Task to create a fat/uber JAR
+// tasks.register('fatJar', Jar) {
+//     duplicatesStrategy = DuplicatesStrategy.EXCLUDE // or WARN
+//     manifest {
+//         attributes 'Main-Class': application.mainClass
+//     }
+//     archiveBaseName = project.name + '-all'
+//     from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+//     with jar
+// }

@@ -1,0 +1,48 @@
+# templates/rust_leptos_csr_v1/scaffold.yaml
+name: "Rust Leptos CSR App v1"
+description: "A basic client-side rendered web application using Rust and Leptos."
+language: rust-leptos # Specific identifier
+variables:
+  - name: crateName
+    prompt: "Enter the crate name (snake_case):"
+    placeholderValue: "--crate-name-placeholder--"
+    default: "my_leptos_app"
+    validationRegex: '^[a-z_][a-z0-9_]*$'
+  - name: pageTitle
+    prompt: "Enter the HTML page title:"
+    placeholderValue: "Leptos Placeholder App"
+    default: "My Leptos App"
+  - name: componentName
+    prompt: "Enter the main component name (PascalCase):"
+    placeholderValue: "PlaceholderAppComponent"
+    default: "App"
+    transformations:
+      kebabCase: "--kebab-component-name--" # For CSS maybe?
+
+binaryExtensions: [".png", ".ico"] # Favicons etc.
+
+# Filename substitution likely not needed for basic CSR
+
+# Hooks could install wasm-pack or trunk if needed
+# postGenerate:
+#   - name: "Install Trunk (if needed)"
+#     command: "cargo install --locked trunk"
+#     ignoreErrors: true
+
+validation:
+  testVariables:
+    crateName: test_leptos_csr
+    pageTitle: "Leptos Test App"
+    componentName: "TestAppComponent"
+  steps:
+    # Need wasm-pack and potentially a simple HTTP server for validation
+    - name: "Check wasm-pack"
+      command: "command -v wasm-pack || cargo install wasm-pack" # Install if missing
+      ignoreErrors: true # Allow proceeding if install fails maybe? Or fail hard?
+    - name: "Build WASM (Release)"
+      # Assuming wasm-pack build is configured in Cargo.toml or run directly
+      command: "wasm-pack build --target web --release"
+      timeoutSecs: 240
+    - name: "Check WASM Output"
+      # Check for expected output files in ./pkg/
+      command: "test -f pkg/{{crateName}}.js && test -f pkg/{{crateName}}_bg.wasm"

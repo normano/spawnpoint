@@ -1,0 +1,59 @@
+name: "Java Gradle CLI App v1"
+description: "A basic Java command-line application using Gradle."
+language: java-gradle # More specific language identifier
+variables:
+  - name: projectGroup # Similar to Maven groupId
+    prompt: "Enter the project group (e.g., com.mycompany):"
+    placeholderValue: "com.example.placeholdergroup"
+    default: "com.example"
+    validationRegex: '^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$'
+  - name: projectName # Used as root project name in settings.gradle & main class base
+    prompt: "Enter the project name (usually kebab-case for dir, PascalCase for classes):"
+    placeholderValue: "placeholder-java-gradle-app"
+    default: "my-java-app"
+    transformations:
+      pascalCase: "__PascalProjectName__" # For Main class name
+      packageName: "__package_name_path__" # For directory structure
+  - name: projectVersion
+    prompt: "Initial application version:"
+    placeholderValue: "0.0.1-SNAPSHOT"
+    default: "1.0.0-SNAPSHOT"
+  - name: javaVersion # Used in build.gradle
+    prompt: "Java Toolchain version (e.g., 11, 17, 21):"
+    placeholderValue: "17" # Placeholder value in build.gradle
+    default: "17"
+
+binaryExtensions: []
+
+placeholderFilenames:
+  prefix: "__VAR_"
+  suffix: "__"
+
+postGenerate:
+  - name: "Initialize Gradle Wrapper"
+    command: "gradle wrapper --gradle-version 8.5" # Or desired version
+    workingDir: "."
+    ignoreErrors: true # Allow generation if local gradle isn't installed
+
+validation:
+  testVariables:
+    projectGroup: "com.testgradle"
+    projectName: "test-gradle-cli" # Input name
+    projectVersion: "0.1.0-TEST"
+    javaVersion: "17"
+    # packageName derived from projectName -> test_gradle_cli
+    # PascalProjectName derived from projectName -> TestGradleCli
+  steps:
+    - name: "Assemble Project"
+      # Use Gradle Wrapper if available, fallback to gradle
+      command: "./gradlew assemble || gradle assemble"
+      timeoutSecs: 180
+    - name: "Run Tests"
+      command: "./gradlew test || gradle test"
+      timeoutSecs: 90
+    - name: "Check Build Output" # Check if jar exists (adjust path if needed)
+      command: "test -f build/libs/{{projectName}}-{{projectVersion}}.jar"
+    - name: "Run Application (Optional)"
+      # Running via gradle is easier than figuring out the exact jar path initially
+      command: "./gradlew run || gradle run"
+      timeoutSecs: 30

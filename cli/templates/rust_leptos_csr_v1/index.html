@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Leptos Placeholder App</title> <!-- Placeholder -->
+    <link rel="stylesheet" href="/style/main.css"> <!-- Link to CSS -->
+    <!-- Link to the generated JS package -->
+    <link rel="preload" href="/pkg/--crate-name-placeholder--.js" as="script" type="module">
+    <link rel="preload" href="/pkg/--crate-name-placeholder--_bg.wasm" as="fetch" type="application/wasm" crossorigin="">
+    <link rel="modulepreload" href="/pkg/--crate-name-placeholder--.js">
+    <!-- Favicon links -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+ </head>
+  <body>
+     <!-- The WASM code will mount the app here -->
+
+     <!-- Load the JS entry point -->
+     <script type="module">import init from '/pkg/--crate-name-placeholder--.js'; init('/pkg/--crate-name-placeholder--_bg.wasm');</script>
+  </body>
+</html>
