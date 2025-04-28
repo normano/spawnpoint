@@ -32,6 +32,7 @@ Spawn Point tackles these issues by providing:
 *   **Interactive Generation:** `spawnpoint generate` - Guides users through template selection and variable input via prompts. Supports non-interactive generation via flags (planned).
 *   **Template Validation:** `spawnpoint validate <lang> <template>` - Runs predefined build/test steps against a template to ensure it generates a valid project.
 *   **Placeholder System:** Uses unique but syntactically valid placeholder *values* in template files (e.g., `"--placeholder-value--"`) mapped in `scaffold.yaml`, avoiding syntax conflicts.
+*   **Variable Input Validation (via optional regex feature)**
 *   **Variable Transformations:** Automatically generates different variable casings (PascalCase, kebab-case, etc.) from a single user input.
 *   **Filename/Directory Substitution:** Renames files and directories based on variables (e.g., `__VAR_componentName__.ts`).
 *   **Conditional File Generation:** Include/exclude template files or directories based on boolean variables.
@@ -59,10 +60,10 @@ spawnpoint list
 spawnpoint generate
 
 # Generate a specific template
-spawnpoint generate -l nodejs -t "Node.js Core App v1" -o ./my-new-node-app
+spawnpoint generate -l nodejs -t "Node.js Base v1" -o ./my-new-node-app
 
-# Validate a template
-spawnpoint validate rust rust_cli_v1
+# Validate a template (use the exact name from scaffold.yaml)
+spawnpoint validate rust "Rust CLI App v1"
 ```
 
 ## Creating Templates
@@ -71,16 +72,18 @@ spawnpoint validate rust rust_cli_v1
 2.  Populate it with the files and directories for your base project. Use unique placeholder *values* (e.g., `__MY_VAR_PLACEHOLDER__`) where substitutions are needed.
 3.  Create a `scaffold.yaml` manifest in the template's root directory, defining:
     *   `name`, `description`, `language`
-    *   `variables` (mapping variable names to prompts and `placeholderValue` strings)
+    *   `variables` (mapping variable names to prompts, `placeholderValue` strings, optional `default`, `validation_regex`, etc.)
     *   Optional: `transformations`, `placeholderFilenames`, `conditionalPaths`, `preGenerate`, `postGenerate`
-    *   Optional but highly recommended: A `validation` section with `testVariables` and `steps` (install, build, test commands).
+    *   Optional but highly recommended: A `validation` section with `testVariables` and `steps` (install, build, test commands). Define `env` maps within steps if specific environment variables are needed (otherwise the parent environment is inherited).
+4.  Test validation: `spawnpoint validate <lang> "<Your Template Name>"`
+5.  Test generation: `spawnpoint generate -l <lang> -t "<Your Template Name>"`
 
 *(See existing templates for examples)*
 
 ## Contributing
 
-Contributions are welcome! Please feel free to open issues or submit pull requests. (Add contribution guidelines later).
+Contributions are welcome! Please feel free to open issues or submit pull requests.
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option. (Or specify the MPL-2.0 license you chose).
+Licensed under the **Mozilla Public License, v. 2.0** ([MPL-2.0](LICENSE) or https://opensource.org/licenses/MPL-2.0).

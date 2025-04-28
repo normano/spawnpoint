@@ -19,6 +19,7 @@ Creating new projects consistently can be tedious. Scaffolding tools help, but t
 *   **Integrated Template Validation:** Verify templates generate working projects.
 *   **Placeholder Value Substitution:** Replaces specific placeholder strings in files.
 *   **Variable Transformations:** Auto-generates `PascalCase`, `kebab-case`, etc., from input.
+*   **Variable Input Validation (via optional regex feature)**
 *   **Filename/Directory Substitution:** Renames files/dirs based on variables.
 *   **Conditional File Generation:** Include/exclude files/dirs based on boolean variables.
 *   **Pre/Post Generation Hooks:** Run custom commands during generation.
@@ -58,9 +59,26 @@ spawnpoint [OPTIONS] <COMMAND>
 
 ---
 
+### Locating Templates
+
+Spawn Point needs to find where your template directories are stored. It searches in the following locations, using the first valid directory it finds:
+
+1.  **`--templates-dir <PATH>` (CLI Flag):** The path provided via the command-line argument. This always takes precedence.
+2.  **`SPAWNPOINT_TEMPLATES_DIR` (Environment Variable):** The path specified in this environment variable.
+3.  **User Configuration Directory:** A `templates` subdirectory within the standard user configuration location. This is the recommended place for users to store their templates after installing `spawnpoint`. Paths vary by OS:
+    *   **Linux:** `$XDG_CONFIG_HOME/spawnpoint/templates` (often `~/.config/spawnpoint/templates`)
+    *   **macOS:** `~/Library/Application Support/spawnpoint/templates`
+    *   **Windows:** `%APPDATA%\spawnpoint\templates` (e.g., `C:\Users\Username\AppData\Roaming\spawnpoint\templates`)
+4.  **Executable-Relative Directory:** A `templates` subdirectory located in the same directory as the `spawnpoint` executable itself. Useful for portable distributions or development setups where templates are bundled.
+5.  **Current Working Directory (CWD):** A `templates` subdirectory within the directory where you run the `spawnpoint` command. This is the last resort and primarily useful during development when working directly inside the `spawnpoint` project repository.
+
+If no valid directory is found in any of these locations, commands like `list` or `generate` will report an error or find no templates.
+
+---
+
 ### `spawnpoint list`
 
-Displays discovered templates from the templates directory.
+Displays discovered templates from the determined templates directory.
 
 **Example:**
 
@@ -75,7 +93,8 @@ Available Spawn Point Templates:
 Name                      | Language      | Description
 --------------------------|---------------|-----------------------------------------------------------------
 Node.js Base v1           | nodejs        | Minimal Node.js/TypeScript project setup.
-Java Gradle CLI App v1    | java-gradle   | A basic Java command-line application using Gradle.
+Java Gradle CLI App v1    | java          | A basic Java command-line application using Gradle.
+Java Maven CLI App v1     | java          | A basic Java command-line application using Maven.
 Rust CLI App v1           | rust          | A basic command-line application written in Rust using Clap.
 Rust Leptos CSR App v1    | rust-leptos   | A basic client-side rendered web application using Rust and Leptos.
 # ... other templates
@@ -124,7 +143,7 @@ Generates a new project. Can be run interactively or with flags.
 
 ### `spawnpoint validate`
 
-Validates a specific template by generating it in a temporary location and running predefined commands (install, build, test, etc.) from its `scaffold.yaml`.
+Validates a specific template by generating it in a temporary location and running predefined commands (install, build, test, etc.) from its `scaffold.yaml`. This is crucial for template maintainers.
 
 **Arguments:**
 
@@ -137,13 +156,14 @@ Validates a specific template by generating it in a temporary location and runni
 # Validate the basic Rust CLI template
 spawnpoint validate rust "Rust CLI App v1"
 
-# Validate with more detailed output
-spawnpoint -vv validate java-gradle "Java Gradle CLI App v1"
+# Validate the Java Gradle template with more detailed output
+# Uses 'java' as the language identifier from its scaffold.yaml
+spawnpoint -vv validate java "Java Gradle CLI App v1"
 ```
 
 **How Validation Works:**
 
-1.  Finds the specified template.
+1.  Finds the specified template using the standard [Locating Templates](#locating-templates) logic.
 2.  Reads the `validation` section in its `scaffold.yaml`.
 3.  Creates a secure temporary directory.
 4.  Generates the template into the temp directory using the `testVariables` defined in the manifest (no interactive prompts).
@@ -155,7 +175,8 @@ spawnpoint -vv validate java-gradle "Java Gradle CLI App v1"
     *   Tests (`npm test`, `cargo test`, `gradle test`, etc.)
 7.  Checks the exit code (and optionally stderr) of each step. If a non-ignored step fails, validation fails.
 8.  Executes `teardown` commands (if any), even if previous steps failed (if `alwaysRun: true`).
-9.  Reports overall success or failure. The temporary directory is automatically cleaned up.
+9.  **Note:** Validation steps inherit the environment (including `PATH`) from `spawnpoint` by default. You can add or override variables using the `env` map within a specific `ValidationStep`.
+10. Reports overall success or failure. The temporary directory is automatically cleaned up.
 
 **Benefits:** This ensures that templates stay functional and produce working projects as dependencies and best practices evolve. It's a crucial tool for template maintainers.
 
@@ -167,22 +188,23 @@ This tool comes with several example templates to demonstrate its capabilities:
 
 *   **`Node.js Base v1` (`nodejs`):** A minimal Node.js/TypeScript setup. Demonstrates basic substitution, transformations (`kebabCase`, `PascalCase`), conditional files (`Dockerfile`), and hooks (`git init`).
 *   **`Rust CLI App v1` (`rust`):** A simple Rust CLI using `clap`. Shows Rust-specific validation steps (`cargo fmt`, `clippy`, `build`, `test`).
-*   **`Java Gradle CLI App v1` (`java-gradle`):** A standard Java CLI project using Gradle. Demonstrates Java project structure, Gradle validation, and filename placeholders for package structure.
+*   **`Java Gradle CLI App v1` (`java`):** A standard Java CLI project using Gradle. Demonstrates Java project structure, Gradle validation, and filename placeholders for package structure.
+*   **`Java Maven CLI App v1` (`java`):** A standard Java CLI project using Maven.
 *   **`Rust Leptos CSR App v1` (`rust-leptos`):** A basic client-side rendered Leptos web app. Shows WASM build validation using `wasm-pack`.
-*   *(Add others like MySQL, Java Maven as needed)*
 
-Explore the `templates/` directory and their `scaffold.yaml` files to see how they are configured.
+Explore the `templates/` directory (found via the [Locating Templates](#locating-templates) logic) and their `scaffold.yaml` files to see how they are configured.
 
 ## Creating Your Own Templates
 
-1.  Create a new directory inside your `templates` directory (e.g., `templates/my-python-api`).
+1.  Create a new directory for your template. The recommended location is within the user configuration directory (see [Locating Templates](#locating-templates)), e.g., `~/.config/spawnpoint/templates/my-python-api`.
 2.  Add your project files. Use unique strings (e.g., `--my-placeholder--`) where values need to be replaced.
 3.  Create a `scaffold.yaml` file in the root of your template directory.
 4.  Define `name`, `description`, `language`.
-5.  Define `variables` with `name`, `prompt`, and the exact `placeholderValue` used in your files. Add `transformations` if needed.
+5.  Define `variables` with `name`, `prompt`, and the exact `placeholderValue` used in your files. Add `transformations` if needed. Add `validation_regex` for input validation if desired (requires `regex` feature).
 6.  Configure `placeholderFilenames`, `conditionalPaths`, `preGenerate`, `postGenerate` as required.
 7.  **Crucially, add a `validation` section:**
     *   Define `testVariables` with realistic values for testing.
-    *   Define `steps` that install dependencies, build, lint, and test the generated project.
+    *   Define `env` maps within steps if specific environment variables are needed (otherwise the parent environment is inherited).
+    *   Define `steps` that install dependencies, build, lint, and test the generated project. Use flags like `--no-daemon` for tools like Gradle if needed.
 8.  Test your template using `spawnpoint validate <lang> "<Your Template Name>"`.
 9.  Test generation using `spawnpoint generate ...`.
