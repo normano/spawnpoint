@@ -55,6 +55,10 @@ validation:
     javaVersion: "17"
     # packageName is derived/used implicitly by placeholderFilenames
   steps:
+    - name: "Generate Maven Wrapper (Validation Only)" # NEW FIRST STEP
+      # Relies on 'mvn' being in PATH
+      command: "mvn -N wrapper:wrapper -Dmaven=3.9.6"
+      ignoreErrors: false
     - name: "Compile Project"
       # Use Maven Wrapper if available, fallback to mvn
       command: "./mvnw clean compile || mvn clean compile"

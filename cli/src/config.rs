@@ -50,6 +50,7 @@ pub enum CaseTransformation {
     SnakeCase,      // my_variable
     KebabCase,      // my-variable
     ShoutySnakeCase, // MY_VARIABLE
+    PackageName, 
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]

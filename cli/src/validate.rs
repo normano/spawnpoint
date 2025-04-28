@@ -91,6 +91,7 @@ pub fn run_validate(args: ValidateArgs, templates_dir: &Path) -> Result<(), Spaw
   utils::copy_template_dir(
     &template_path, // Use the correctly found path
     temp_path,
+    &validation_config.test_variables,
     &all_test_substitutions,
     &manifest,
   )?;

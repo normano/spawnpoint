@@ -1,6 +1,6 @@
 name: "Java Gradle CLI App v1"
 description: "A basic Java command-line application using Gradle."
-language: java-gradle # More specific language identifier
+language: java # More specific language identifier
 variables:
   - name: projectGroup # Similar to Maven groupId
     prompt: "Enter the project group (e.g., com.mycompany):"
@@ -31,7 +31,7 @@ placeholderFilenames:
 
 postGenerate:
   - name: "Initialize Gradle Wrapper"
-    command: "gradle wrapper --gradle-version 8.5" # Or desired version
+    command: "gradle wrapper --gradle-version 8.5 --no-daemon" # Or desired version
     workingDir: "."
     ignoreErrors: true # Allow generation if local gradle isn't installed
 
@@ -44,16 +44,21 @@ validation:
     # packageName derived from projectName -> test_gradle_cli
     # PascalProjectName derived from projectName -> TestGradleCli
   steps:
+    - name: "Generate Gradle Wrapper (Validation Only)" # NEW FIRST STEP
+      # This step relies on 'gradle' being available in the validation environment's PATH
+      command: "gradle wrapper --gradle-version 8.5 --no-daemon"
+      ignoreErrors: false # Fail validation if wrapper can't be generated
+      # No timeout needed usually
     - name: "Assemble Project"
       # Use Gradle Wrapper if available, fallback to gradle
-      command: "./gradlew assemble || gradle assemble"
+      command: "./gradlew assemble --no-daemon || gradle assemble --no-daemon"
       timeoutSecs: 180
     - name: "Run Tests"
-      command: "./gradlew test || gradle test"
+      command: "./gradlew test --no-daemon || gradle test --no-daemon"
       timeoutSecs: 90
     - name: "Check Build Output" # Check if jar exists (adjust path if needed)
       command: "test -f build/libs/{{projectName}}-{{projectVersion}}.jar"
     - name: "Run Application (Optional)"
       # Running via gradle is easier than figuring out the exact jar path initially
-      command: "./gradlew run || gradle run"
+      command: "./gradlew run --no-daemon || gradle run --no-daemon"
       timeoutSecs: 30

@@ -78,7 +78,13 @@ pub fn run_generate(args: GenerateArgs, templates_dir: &Path) -> Result<(), Spaw
 
   // --- 5. Generate Project ---
   info!("Generating project files...");
-  utils::copy_template_dir(&template_path, output_path, &all_substitutions, &manifest)?;
+  utils::copy_template_dir(
+    &template_path,
+    output_path,
+    &base_variables,
+    &all_substitutions,
+    &manifest,
+  )?;
 
   info!(
     "Successfully generated project in '{}'!",
@@ -450,7 +456,7 @@ fn gather_variables(manifest: &ScaffoldManifest) -> Result<HashMap<String, Strin
             match Regex::new(regex_str) {
               Ok(regex) => {
                 let regex_err_msg = format!("Input must match regex: {}", regex_str);
-                input =input.validate_with(move |input: &String| -> Result<(), String> {
+                input = input.validate_with(move |input: &String| -> Result<(), String> {
                   if regex.is_match(input) {
                     Ok(())
                   } else {

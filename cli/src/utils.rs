@@ -1,14 +1,17 @@
-// src/utils.rs
-use heck::{ToKebabCase, ToLowerCamelCase, ToPascalCase, ToShoutySnakeCase, ToSnakeCase};
-use indicatif::{ProgressBar, ProgressStyle};
-use log::{debug, info, trace, warn};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
+use std::io::{BufReader, ErrorKind, Read};
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, ExitStatus, Output, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use duct::Expression; // Add duct expression import
+use duct::{cmd, Handle}; // Add duct import
+use heck::{ToKebabCase, ToLowerCamelCase, ToPascalCase, ToShoutySnakeCase, ToSnakeCase};
+use indicatif::{ProgressBar, ProgressStyle};
+use log::{debug, error, info, trace, warn};
 use walkdir::WalkDir;
 
 use crate::config::{
@@ -45,6 +48,16 @@ pub fn compute_transformed_variables(
           CaseTransformation::SnakeCase => base_value.to_snake_case(),
           CaseTransformation::KebabCase => base_value.to_kebab_case(),
           CaseTransformation::ShoutySnakeCase => base_value.to_shouty_snake_case(),
+          CaseTransformation::PackageName => {
+            // Simple version: lowercase and remove non-alphanumerics
+            // More complex might involve splitting by case/separators first
+            base_value
+              .chars()
+              .filter(|c| c.is_ascii_alphanumeric())
+              .collect::<String>()
+              .to_lowercase()
+            // Or alternatively, use snake_case: base_value.to_snake_case()
+          }
         };
         // Store computed value keyed by placeholder
         all_substitutions.insert(transform_placeholder.clone(), transformed_value.clone());
@@ -97,7 +110,8 @@ pub fn compute_transformed_variables(
 pub fn copy_template_dir(
   template_path: &Path,
   output_path: &Path,
-  substitutions: &HashMap<String, String>,
+  base_variables: &HashMap<String, String>,
+  all_substitutions: &HashMap<String, String>,
   manifest: &ScaffoldManifest,
 ) -> Result<(), SpawnError> {
   debug!(
@@ -111,7 +125,7 @@ pub fn copy_template_dir(
     .variables
     .iter()
     .filter_map(|vd| {
-      substitutions
+      all_substitutions
         .get(&vd.placeholder_value)
         .map(|val| (vd.name.clone(), val.clone()))
     })
@@ -147,7 +161,7 @@ pub fn copy_template_dir(
     let relative_path_str = relative_path.to_string_lossy().to_string();
     let mut skip_entry = false;
     if let Some(condition) = manifest.conditional_paths.get(&relative_path_str) {
-      if !evaluate_condition(condition, &base_variables_for_condition) {
+      if !evaluate_condition(condition, &base_variables) {
         skip_entry = true;
         if entry.file_type().is_dir() {
           count_walker.skip_current_dir();
@@ -255,7 +269,8 @@ pub fn copy_template_dir(
         if let Some(segment_str) = component.as_os_str().to_str() {
           let substituted_segment = substitute_path_segment(
             segment_str,
-            substitutions,
+            base_variables,
+            all_substitutions,
             placeholder_config,
             &manifest.variables,
           );
@@ -304,7 +319,7 @@ pub fn copy_template_dir(
           current_path.display()
         );
         let content = fs::read_to_string(current_path)?;
-        let substituted_content = substitute_content(&content, substitutions, manifest);
+        let substituted_content = substitute_content(&content, all_substitutions, manifest);
         trace!(
           "Writing substituted file to: {}",
           output_entry_path.display()
@@ -381,196 +396,235 @@ pub fn substitute_content(
   current_content
 }
 
-/// Performs variable substitution on a single path segment (filename or directory name)
-/// using the placeholder filename markers defined in the manifest.
+/// Performs variable substitution on a single path segment (filename or directory name).
+/// It handles both direct variable markers (__VAR_name__) and transformation placeholders.
 fn substitute_path_segment(
   segment: &str,
-  substitutions: &HashMap<String, String>,
+  base_variables: &HashMap<String, String>, // Needed for __VAR_...__ substitution
+  all_substitutions: &HashMap<String, String>, // Contains ALL placeholders -> final value
   placeholder_config: &Option<PlaceholderFilenames>,
-  variable_definitions: &[VariableDefinition],
+  variable_definitions: &[VariableDefinition], // Needed to identify __VAR_...__ markers
 ) -> String {
+  // If no placeholder config, no substitution needed for path segments
   let Some(config) = placeholder_config else {
     return segment.to_string();
   };
 
   let mut current_segment = segment.to_string();
 
-  // We need to know which placeholders correspond to filename variables
+  // --- Pass 1: Handle __VAR_...__ placeholders ---
+  // These are substituted with the *base* variable value.
   for var_def in variable_definitions {
-    // Construct the potential marker based on the variable name
-    let marker = format!("{}{}{}", config.prefix, var_def.name, config.suffix);
-    // Check if this marker exists in the segment
-    if current_segment.contains(&marker) {
-      // Find the corresponding *value* from the base variables map (user input)
-      // This assumes the path segment uses the {{varName}} style marker, not the content placeholder!
-      // Let's refine this: Path substitution should use the prefix/suffix style.
-      if let Some(_value) = substitutions.get(&var_def.placeholder_value) {
-        // Get the original value first
-        // Now apply transformations *if needed* based on the structure of the marker?
-        // This gets complex. Let's simplify: assume path markers map directly to original variable names.
-        // The marker IS e.g. __VAR_myVar__
-        if let Some(user_value) = substitutions.get(&var_def.placeholder_value) {
-          // Still use original value
-          current_segment = current_segment.replace(&marker, user_value);
-        }
+    let var_marker = format!("{}{}{}", config.prefix, var_def.name, config.suffix);
+    if current_segment.contains(&var_marker) {
+      if let Some(base_value) = base_variables.get(&var_def.name) {
+        // Replace __VAR_name__ with the raw user input for 'name'
+        current_segment = current_segment.replace(&var_marker, base_value);
+        trace!(
+          "Path Segment Subst (Pass 1): Replaced '{}' with base value '{}'",
+          var_marker,
+          base_value
+        );
       } else {
         warn!(
-          "Variable '{}' used in path marker '{}' but not found in substitutions map.",
-          var_def.name, marker
+          "Variable '{}' used in path marker '{}' but not found in base variables map.",
+          var_def.name, var_marker
         );
       }
     }
-    // Also check for transformation placeholders in the path segment
-    for (_case, transform_placeholder) in &var_def.transformations {
-      // Construct the marker like __VAR_PascalCase_myVar__ ? Or just use the placeholder directly?
-      // Let's assume paths only use the main variable marker for simplicity for now.
-      // If transform_placeholder appears in the segment string, replace it.
-      if current_segment.contains(transform_placeholder) {
-        if let Some(transformed_value) = substitutions.get(transform_placeholder) {
-          current_segment = current_segment.replace(transform_placeholder, transformed_value);
-        } else {
-          warn!("Transformation placeholder '{}' used in path segment but not found in substitutions map.", transform_placeholder);
-        }
-      }
+  }
+
+  // --- Pass 2: Handle ALL other placeholders (including transformations and direct base placeholders) ---
+  // This uses the pre-computed map of all placeholders (e.g., __PascalName__, --kebab-case--, --base-placeholder--)
+  // to their final transformed/base values.
+  for (placeholder, final_value) in all_substitutions {
+    // Directly replace any remaining occurrences of placeholders from the comprehensive map.
+    // This naturally handles transformation placeholders and any direct base placeholders
+    // that weren't substituted via the __VAR_ mechanism in Pass 1.
+    if current_segment.contains(placeholder) {
+      trace!(
+        "Path Segment Subst (Pass 2): Replacing placeholder '{}' with value '{}'",
+        placeholder,
+        final_value
+      );
+      current_segment = current_segment.replace(placeholder, final_value);
     }
   }
+
+  // Debug log the final result
+  if segment != current_segment {
+    debug!(
+      "Substituted path segment '{}' -> '{}'",
+      segment, current_segment
+    );
+  }
+
   current_segment
 }
 
 /// Executes a validation step command.
 pub fn run_command(
   step: &ValidationStep,
-  working_dir: &Path, // The actual directory to run in
+  working_dir: &Path,
   base_variables: &HashMap<String, String>,
 ) -> Result<Output, SpawnError> {
+  // 1. Substitute command string
   let substituted_command = substitute_command_for_validation(&step.command, base_variables);
-  info!(
-    "Executing step '{}': `{}` in {}",
-    step.name,
-    substituted_command,
-    working_dir.display()
+
+  // 2. Prepare timeout duration
+  let timeout_duration = step.timeout_secs.map(Duration::from_secs);
+
+  // 3. Call the execution helper
+  let exec_result = execute_command_with_duct(
+    &step.name,
+    &substituted_command,
+    working_dir,
+    &step.env,
+    timeout_duration,
   );
 
-  let mut cmd = Command::new("sh"); // Using sh -c for simplicity
-  cmd.arg("-c").arg(&substituted_command);
+  // 4. Process the result from the helper (interpret status, stderr, ignore_errors)
+  match exec_result {
+    Ok(output) => {
+      // Includes non-zero exits because of unchecked()
+      debug!("Step '{}' executed. Status: {:?}", step.name, output.status);
+      if log::log_enabled!(log::Level::Trace) {
+        trace!(
+          "Step '{}' stdout:\n{}",
+          step.name,
+          String::from_utf8_lossy(&output.stdout)
+        );
+        trace!(
+          "Step '{}' stderr:\n{}",
+          step.name,
+          String::from_utf8_lossy(&output.stderr)
+        );
+      }
 
-  cmd.current_dir(working_dir);
-  cmd.envs(&step.env);
+      // Check status, respecting ignore_errors
+      if !output.status.success() {
+        let stderr_string = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout_string = String::from_utf8_lossy(&output.stdout).to_string();
+        // Log non-zero exit status correctly
+        let status_display = output
+          .status
+          .code()
+          .map(|c| c.to_string())
+          .or_else(|| output.status.signal().map(|s| format!("signal {}", s)))
+          .unwrap_or_else(|| "unknown".to_string());
+        warn!(
+          "Step '{}' failed with status: {}. Stderr: {}",
+          step.name,
+          status_display,
+          stderr_string.lines().next().unwrap_or("<empty stderr>")
+        );
 
-  cmd.stdout(Stdio::piped());
-  cmd.stderr(Stdio::piped());
-
-  let mut child = cmd.spawn().map_err(|e| SpawnError::CommandExecError {
-    step_name: step.name.clone(),
-    source: Box::new(e),
-  })?;
-
-  // --- Basic Timeout Handling (more robust solutions exist) ---
-  let timeout = step.timeout_secs.map(Duration::from_secs);
-  let status = match timeout {
-    Some(duration) => {
-      // This is a simplified timeout check. It doesn't guarantee killing grandchildren.
-      // Crates like `wait-timeout` handle this better.
-      match child.try_wait() {
-        Ok(Some(status)) => Ok(status), // Exited quickly
-        Ok(None) => {
-          // Not exited yet, wait with timeout
-          thread::sleep(duration);
-          match child.try_wait() {
-            Ok(Some(status)) => Ok(status), // Exited within timeout
-            Ok(None) => {
-              // Timeout exceeded, kill the process
-              warn!(
-                "Step '{}' timed out after {}s. Attempting to kill.",
-                step.name,
-                duration.as_secs()
-              );
-              child.kill().map_err(|e| SpawnError::CommandExecError {
-                step_name: step.name.clone(),
-                source: Box::new(e),
-              })?;
-              Err(SpawnError::CommandExecError {
-                step_name: step.name.clone(),
-                source: format!("Step timed out after {} seconds", duration.as_secs()).into(), // Create a boxed error
-              })
-            }
-            Err(e) => Err(SpawnError::CommandExecError {
+        // Check if the specific error is "command not found" (127 on Unix)
+        // This provides a more specific error message than CommandFailedStatus
+        #[cfg(unix)]
+        if output.status.code() == Some(127) {
+          if !step.ignore_errors {
+            return Err(SpawnError::CommandExecError {
               step_name: step.name.clone(),
-              source: Box::new(e),
-            }),
+              source: format!("Command not found (exit code 127): {}", substituted_command).into(),
+            });
+          } else {
+            info!(
+              "Ignoring failed status (command not found) for step '{}' (ignore_errors=true).",
+              step.name
+            );
+            // Fall through to check stderr below if needed
+          }
+        } else {
+          // Handle other non-zero exits
+          if !step.ignore_errors {
+            return Err(SpawnError::CommandFailedStatus {
+              step_name: step.name.clone(),
+              status: output.status,
+              stdout: stdout_string,
+              stderr: stderr_string,
+            });
+          } else {
+            info!(
+              "Ignoring failed status ({}) for step '{}' (ignore_errors=true).",
+              status_display, step.name
+            );
           }
         }
-        Err(e) => Err(SpawnError::CommandExecError {
-          step_name: step.name.clone(),
-          source: Box::new(e),
-        }),
-      }
-    }
-    None => child.wait().map_err(|e| SpawnError::CommandExecError {
-      step_name: step.name.clone(),
-      source: Box::new(e),
-    }),
-  };
+        #[cfg(not(unix))] // Fallback for non-unix
+        {
+          if !step.ignore_errors {
+            return Err(SpawnError::CommandFailedStatus {
+              step_name: step.name.clone(),
+              status: output.status,
+              stdout: stdout_string,
+              stderr: stderr_string,
+            });
+          } else {
+            info!(
+              "Ignoring failed status ({}) for step '{}' (ignore_errors=true).",
+              status_display, step.name
+            );
+          }
+        }
+      } // end if !output.status.success()
 
-  // Capture output even if status indicated timeout/kill error
-  let mut stdout_str = String::new();
-  let mut stderr_str = String::new();
-  // Use take() to get ownership of the handles, allowing reading after wait/kill
-  if let Some(mut stdout_handle) = child.stdout.take() {
-    stdout_handle
-      .read_to_string(&mut stdout_str)
-      .unwrap_or_else(|e| {
-        warn!("Failed to read stdout for step '{}': {}", step.name, e);
-        0 // .unwrap_or_else returns the value inside closure
-      });
-  }
-  if let Some(mut stderr_handle) = child.stderr.take() {
-    stderr_handle
-      .read_to_string(&mut stderr_str)
-      .unwrap_or_else(|e| {
-        warn!("Failed to read stderr for step '{}': {}", step.name, e);
-        0
-      });
-  }
-
-  debug!("Step '{}' stdout:\n{}", step.name, stdout_str);
-  debug!("Step '{}' stderr:\n{}", step.name, stderr_str);
-
-  // Now handle the status determined earlier
-  match status {
-    Ok(exit_status) => {
-      let output = Output {
-        status: exit_status,
-        stdout: stdout_str.into_bytes(),
-        stderr: stderr_str.into_bytes(),
-      };
-
-      // Check exit status
-      if !output.status.success() {
-        warn!(
-          "Step '{}' exited with non-zero status: {:?}",
-          step.name,
-          output.status.code()
-        );
-        // Don't return Err here if ignore_errors is true, let the caller decide
-        // But still return the output object
-        return Ok(output); // Caller checks ignore_errors based on status
-      }
-
-      // Check stderr if required
+      // Check stderr content, respecting ignore_errors
+      // This check runs even if the command failed but ignore_errors=true
       if step.check_stderr && !output.stderr.is_empty() {
+        let stderr_string = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout_string = String::from_utf8_lossy(&output.stdout).to_string();
         warn!(
-          "Step '{}' produced output on stderr (check_stderr enabled).",
-          step.name
+          "Step '{}' produced stderr (check_stderr=true): {}",
+          step.name,
+          stderr_string.lines().next().unwrap_or("<empty stderr>")
         );
-        // Return Ok, let caller check ignore_errors based on this condition
-        return Ok(output); // Caller checks ignore_errors based on stderr content
+        if !step.ignore_errors {
+          // Only fail if the command *also* succeeded OR if status failure was ignored
+          if output.status.success() || step.ignore_errors {
+            return Err(SpawnError::CommandStderrNotEmpty {
+              step_name: step.name.clone(),
+              stdout: stdout_string,
+              stderr: stderr_string,
+            });
+          }
+          // Otherwise, the CommandFailedStatus error takes precedence
+        } else {
+          info!(
+            "Ignoring non-empty stderr for step '{}' (ignore_errors=true).",
+            step.name
+          );
+        }
       }
 
-      // Success case
+      // If we passed the checks or ignored the failures
+      info!("Step '{}' considered successful.", step.name);
       Ok(output)
     }
-    Err(e) => Err(e), // Propagate timeout or wait errors
+    Err(e) => {
+      // Error from execute_command_with_duct (timeout, spawn error, wait error)
+      error!("Execution error for step '{}': {}", step.name, e);
+      if !step.ignore_errors {
+        Err(e) // Propagate the execution error
+      } else {
+        info!(
+          "Ignoring execution error for step '{}' (ignore_errors=true).",
+          step.name
+        );
+        // Construct a dummy error Output when ignoring execution errors
+        let exit_status = if cfg!(unix) {
+          ExitStatus::from_raw(1) // Use 1 as generic error code
+        } else {
+          ExitStatus::from_raw(1)
+        };
+
+        Ok(Output {
+          status: exit_status,
+          stdout: Vec::new(),
+          stderr: format!("Execution failed and ignored: {}", e).into_bytes(),
+        })
+      }
+    }
   }
 }
 
@@ -585,4 +639,166 @@ fn substitute_command_for_validation(
     command = command.replace(&placeholder, value);
   }
   command
+}
+
+/// Executes a command using duct, waits for completion (or timeout), then captures output.
+/// Duct's capture methods use background threads internally, preventing I/O deadlocks.
+/// Executes a command using duct, waits for completion (or timeout), then captures output.
+/// Uses duct's internal background threads for capture and unchecked() to get Output on non-zero exit.
+fn execute_command_with_duct(
+  step_name: &str,
+  command_str: &str,
+  working_dir: &Path,
+  env_overrides: &HashMap<String, String>,
+  timeout: Option<Duration>,
+) -> Result<Output, SpawnError> {
+  info!(
+    "Executing (duct unchecked): Step '{}', Command: `{}` in {}",
+    step_name,
+    command_str,
+    working_dir.display()
+  );
+
+  // 1. Configure command, including capture and unchecked()
+  let mut command_expr = cmd!("sh", "-c", command_str)
+    .dir(working_dir)
+    .stdout_capture() // Capture stdout - duct reads in background thread
+    .stderr_capture() // Capture stderr - duct reads in background thread
+    .unchecked(); // <<< --- Add this back! Ensures Ok(Output) on non-zero exit
+
+  // 2. Apply environment overrides iteratively using .env()
+  //    This preserves the inherited environment.
+  for (key, value) in env_overrides {
+    command_expr = command_expr.env(key, value); // Add/override specific vars
+  }
+
+  // 2. Start the command, get a handle
+  let handle: Handle = match command_expr.start() {
+    Ok(h) => h,
+    Err(e) => {
+      error!("Failed to start command for step '{}': {}", step_name, e);
+      if e.kind() == ErrorKind::NotFound {
+        // Specific error for command not found during start
+        return Err(SpawnError::CommandExecError {
+          step_name: step_name.to_string(),
+          source: format!("Command/shell not found for step '{}': {}", step_name, e).into(),
+        });
+      }
+      return Err(SpawnError::CommandExecError {
+        step_name: step_name.to_string(),
+        source: Box::new(e), // Other spawn error
+      });
+    }
+  }; // Make handle mutable for kill()
+
+  // 3. Wait for completion: either blocking wait or polling loop with timeout
+  let final_result: Result<Output, SpawnError> = match timeout {
+    // --- Case: No Timeout ---
+    None => {
+      // With unchecked(), wait() returns Ok(Output) or Err(WaitError for non-exit reasons)
+      match handle.wait() {
+        Ok(output) => {
+          debug!(
+            "Step '{}' finished (no timeout, unchecked). Status: {:?}",
+            step_name, output.status
+          );
+          Ok(output.clone()) // Includes non-zero exits
+        }
+        Err(duct_wait_error) => {
+          // This is now only for errors *other* than non-zero exit status (e.g., OS error)
+          error!(
+            "Error waiting (no timeout) for step '{}': {}",
+            step_name, duct_wait_error
+          );
+          Err(SpawnError::CommandExecError {
+            // Report as execution error
+            step_name: step_name.to_string(),
+            source: Box::new(duct_wait_error),
+          })
+        }
+      }
+    }
+    // --- Case: Timeout ---
+    Some(duration) => {
+      let start = Instant::now();
+      let poll_interval = Duration::from_millis(50); // How often to check
+
+      loop {
+        // try_wait() returns Ok(Some(Output)) or Ok(None) or Err(WaitError)
+        match handle.try_wait() {
+          Ok(Some(output)) => {
+            // Process finished within timeout (could be non-zero due to unchecked())
+            debug!(
+              "Step '{}' finished (timeout loop, unchecked). Status: {:?}",
+              step_name, output.status
+            );
+            break Ok(output.clone());
+          }
+          Ok(None) => {
+            // Process still running, check timer
+            if start.elapsed() >= duration {
+              // Timeout exceeded
+              error!(
+                "Step '{}' timed out after {:?}. Killing process.",
+                step_name, duration
+              );
+              if let Err(kill_err) = handle.kill() {
+                // Attempt to kill
+                warn!(
+                  "Failed to kill timed-out process for step '{}': {}",
+                  step_name, kill_err
+                );
+              }
+              break Err(SpawnError::CommandExecError {
+                // Return timeout error
+                step_name: step_name.to_string(),
+                source: format!("Step timed out after {} seconds", duration.as_secs()).into(),
+              });
+            } else {
+              // Still within time, sleep a bit
+              thread::sleep(poll_interval);
+            }
+          }
+          Err(duct_wait_error) => {
+            // Error during try_wait itself (not non-zero exit, but actual wait error)
+            error!(
+              "Error during try_wait for step '{}': {}",
+              step_name, duct_wait_error
+            );
+            break Err(SpawnError::CommandExecError {
+              // Report as execution error
+              step_name: step_name.to_string(),
+              source: Box::new(duct_wait_error),
+            });
+          }
+        } // end match try_wait
+      } // end loop
+    } // end Some(duration)
+  }; // end match timeout
+
+  // 4. Log final result details (no changes needed here)
+  match &final_result {
+    Ok(output) => {
+      if log::log_enabled!(log::Level::Trace) {
+        trace!(
+          "Step '{}' final stdout:\n{}",
+          step_name,
+          String::from_utf8_lossy(&output.stdout)
+        );
+        trace!(
+          "Step '{}' final stderr:\n{}",
+          step_name,
+          String::from_utf8_lossy(&output.stderr)
+        );
+      }
+    }
+    Err(e) => {
+      error!(
+        "Step '{}' ultimately failed with execution error: {}",
+        step_name, e
+      );
+    }
+  }
+
+  final_result // Return the Ok(Output) or Err(SpawnError)
 }
