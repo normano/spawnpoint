@@ -30,6 +30,12 @@ placeholderFilenames:
   prefix: "__VAR_"
   suffix: "__"
 
+exclude:
+  - "target"
+  - "Cargo.lock"
+  - ".git"
+  - ".DS_Store"
+
 # --- Hooks ---
 postGenerate:
   - name: "Format Code"

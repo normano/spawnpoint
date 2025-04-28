@@ -33,6 +33,8 @@ pub struct ScaffoldManifest {
   /// Map from relative template path (String) to the condition for inclusion.
   #[serde(default)]
   pub conditional_paths: HashMap<String, Condition>,
+  #[serde(default)]
+  pub exclude: Vec<String>,
   // --- Hooks ---
   #[serde(default)]
   pub pre_generate: Vec<ValidationStep>, // Runs before generation

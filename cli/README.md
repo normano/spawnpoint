@@ -22,6 +22,7 @@ Creating new projects consistently can be tedious. Scaffolding tools help, but t
 *   **Variable Input Validation (via optional regex feature)**
 *   **Filename/Directory Substitution:** Renames files/dirs based on variables.
 *   **Conditional File Generation:** Include/exclude files/dirs based on boolean variables.
+*   **Excluding Files/Directories:** Exclude specific files or directories by name (e.g., `target`, `.git`, `.DS_Store`) from template processing.
 *   **Pre/Post Generation Hooks:** Run custom commands during generation.
 *   **Cross-Platform:** Built with Rust.
 
@@ -31,6 +32,7 @@ Creating new projects consistently can be tedious. Scaffolding tools help, but t
 
 ```bash
 # Example (replace with actual instructions later)
+# Install from source after cloning the repository:
 cargo install --path .
 # OR
 # Download binary from releases page...
@@ -166,7 +168,7 @@ spawnpoint -vv validate java "Java Gradle CLI App v1"
 1.  Finds the specified template using the standard [Locating Templates](#locating-templates) logic.
 2.  Reads the `validation` section in its `scaffold.yaml`.
 3.  Creates a secure temporary directory.
-4.  Generates the template into the temp directory using the `testVariables` defined in the manifest (no interactive prompts).
+4.  Generates the template into the temp directory using the `testVariables` defined in the manifest (no interactive prompts). **Excludes files/directories listed in `exclude`.**
 5.  Executes `setup` commands (if any).
 6.  **Executes `steps` commands sequentially inside the temp directory.** These usually include:
     *   Dependency installation (`npm install`, `cargo build`, `gradle assemble`, etc.)
@@ -187,7 +189,7 @@ spawnpoint -vv validate java "Java Gradle CLI App v1"
 This tool comes with several example templates to demonstrate its capabilities:
 
 *   **`Node.js Base v1` (`nodejs`):** A minimal Node.js/TypeScript setup. Demonstrates basic substitution, transformations (`kebabCase`, `PascalCase`), conditional files (`Dockerfile`), and hooks (`git init`).
-*   **`Rust CLI App v1` (`rust`):** A simple Rust CLI using `clap`. Shows Rust-specific validation steps (`cargo fmt`, `clippy`, `build`, `test`).
+*   **`Rust CLI App v1` (`rust`):** A simple Rust CLI using `clap`. Shows Rust-specific validation steps (`cargo fmt`, `clippy`, `build`, `test`). Includes `exclude: [ "target" ]`.
 *   **`Java Gradle CLI App v1` (`java`):** A standard Java CLI project using Gradle. Demonstrates Java project structure, Gradle validation, and filename placeholders for package structure.
 *   **`Java Maven CLI App v1` (`java`):** A standard Java CLI project using Maven.
 *   **`Rust Leptos CSR App v1` (`rust-leptos`):** A basic client-side rendered Leptos web app. Shows WASM build validation using `wasm-pack`.
@@ -197,14 +199,75 @@ Explore the `templates/` directory (found via the [Locating Templates](#locating
 ## Creating Your Own Templates
 
 1.  Create a new directory for your template. The recommended location is within the user configuration directory (see [Locating Templates](#locating-templates)), e.g., `~/.config/spawnpoint/templates/my-python-api`.
-2.  Add your project files. Use unique strings (e.g., `--my-placeholder--`) where values need to be replaced.
+2.  Add your project files. Use unique strings (e.g., `--my-placeholder--`) where values need to be replaced. **Do not include build artifact directories like `target/`, `node_modules/`, `dist/`, etc.**
 3.  Create a `scaffold.yaml` file in the root of your template directory.
 4.  Define `name`, `description`, `language`.
 5.  Define `variables` with `name`, `prompt`, and the exact `placeholderValue` used in your files. Add `transformations` if needed. Add `validation_regex` for input validation if desired (requires `regex` feature).
 6.  Configure `placeholderFilenames`, `conditionalPaths`, `preGenerate`, `postGenerate` as required.
-7.  **Crucially, add a `validation` section:**
+7.  Configure `binaryExtensions` (e.g., `.png`, `.lock`) and `binaryFiles` (e.g., `.DS_Store`) for files that should be copied without processing content.
+8.  Configure `exclude` with a list of file or directory names (e.g., `target`, `.git`, `.mypy_cache`) that should be completely ignored during generation. This is primarily for ignoring files/directories that might accidentally be present in the template source but shouldn't be copied.
+9.  **Crucially, add a `validation` section:**
     *   Define `testVariables` with realistic values for testing.
     *   Define `env` maps within steps if specific environment variables are needed (otherwise the parent environment is inherited).
     *   Define `steps` that install dependencies, build, lint, and test the generated project. Use flags like `--no-daemon` for tools like Gradle if needed.
-8.  Test your template using `spawnpoint validate <lang> "<Your Template Name>"`.
-9.  Test generation using `spawnpoint generate ...`.
+10. Test your template using `spawnpoint validate <lang> "<Your Template Name>"`.
+11. Test generation using `spawnpoint generate ...`.
+
+---
+
+## Development
+
+This section provides instructions for developing `spawnpoint` itself.
+
+**Prerequisites:**
+
+*   **Rust Toolchain:** Ensure you have Rust installed. You can get it from [rustup.rs](https://rustup.rs/).
+
+**Building:**
+
+1.  Clone the repository:
+    ```bash
+    git clone <repository-url>
+    cd spawnpoint # Or your repo name
+    ```
+2.  Build the project:
+    *   For a development build:
+        ```bash
+        cargo build
+        ```
+    *   For an optimized release build:
+        ```bash
+        cargo build --release
+        ```
+    The executable will be located in `target/debug/spawnpoint` or `target/release/spawnpoint`.
+
+**Running Locally:**
+
+You can run the development version directly using `cargo run`. Any arguments after `--` will be passed directly to `spawnpoint`:
+
+```bash
+# Run the list command (using templates in ./templates/ if it exists)
+cargo run -- list
+
+# Generate using a specific template directory
+cargo run -- --templates-dir /path/to/your/templates generate -l rust -t "My Dev Template"
+
+# Validate a template with high verbosity
+cargo run -- -vvv --templates-dir /path/to/your/templates validate rust "My Dev Template"
+```
+
+**Testing:**
+
+Run the test suite using:
+
+```bash
+cargo test
+```
+
+**Tips for Development:**
+
+*   **Local Templates:** Use the `--templates-dir path/to/your/test/templates` flag frequently to test against templates you are developing locally without needing to install them globally or rely on default locations.
+*   **Verbosity:** Use `-v`, `-vv`, or `-vvv` flags with `cargo run -- ...` to get detailed logging output, which is helpful for debugging generation or validation issues.
+*   **Enable Features:** If testing features behind feature flags (like `regex`), use `cargo run --features regex -- ...` or `cargo build --features regex`.
+
+---

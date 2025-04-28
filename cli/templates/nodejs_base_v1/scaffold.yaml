@@ -49,6 +49,11 @@ placeholderFilenames:
   prefix: "__VAR_" # Use this for filename substitution based on original var name
   suffix: "__"
 
+exclude:
+  - ".git"
+  - "node_modules"
+  - ".DS_Store"
+
 conditionalPaths:
   # Key is the relative path from template root
   "Dockerfile": { variable: "includeDocker", value: "true" } # Include file if includeDocker is true

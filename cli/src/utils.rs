@@ -1,14 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufReader, ErrorKind, Read};
+use std::io::ErrorKind;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Output, Stdio};
+use std::process::{ExitStatus, Output};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use duct::Expression; // Add duct expression import
-use duct::{cmd, Handle}; // Add duct import
+use duct::{cmd, Handle};
 use heck::{ToKebabCase, ToLowerCamelCase, ToPascalCase, ToShoutySnakeCase, ToSnakeCase};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error, info, trace, warn};
@@ -131,6 +130,8 @@ pub fn copy_template_dir(
     })
     .collect::<HashMap<String, String>>();
 
+  let exclude_set: HashSet<String> = manifest.exclude.iter().cloned().collect();
+
   let mut file_count: u64 = 0;
   let mut count_walker = WalkDir::new(template_path).into_iter();
   loop {
@@ -150,8 +151,21 @@ pub fn copy_template_dir(
         continue;
       }
     };
-    if entry.path() == template_path {
+
+    let current_path = entry.path(); // Define current_path here for exclusion check
+
+    if current_path == template_path {
       continue;
+    }
+
+    if let Some(entry_name) = current_path.file_name().and_then(|n| n.to_str()) {
+      if exclude_set.contains(entry_name) {
+        if entry.file_type().is_dir() {
+          count_walker.skip_current_dir(); // Skip directory contents if dir is excluded
+        }
+        // Skip processing this entry entirely (whether file or dir)
+        continue;
+      }
     }
 
     let relative_path = match entry.path().strip_prefix(template_path) {
@@ -223,6 +237,20 @@ pub fn copy_template_dir(
     // Skip the root template directory itself
     if current_path == template_path {
       continue;
+    }
+
+    if let Some(entry_name) = current_path.file_name().and_then(|n| n.to_str()) {
+      if exclude_set.contains(entry_name) {
+        debug!(
+          "Excluding entry '{}' based on exclude list.",
+          current_path.display()
+        );
+        if entry.file_type().is_dir() {
+          walker.skip_current_dir(); // Skip directory contents if dir is excluded
+        }
+        // Skip processing this entry entirely (whether file or dir)
+        continue;
+      }
     }
 
     let relative_path = match current_path.strip_prefix(template_path) {
@@ -318,7 +346,23 @@ pub fn copy_template_dir(
           "Reading and substituting text file: {}",
           current_path.display()
         );
-        let content = fs::read_to_string(current_path)?;
+        let content = match fs::read_to_string(current_path) {
+          Ok(s) => s,
+          Err(e) => {
+            // Add specific logging if the error is InvalidData
+            if e.kind() == ErrorKind::InvalidData {
+              error!(
+                      "UTF-8 READ ERROR: Failed to read '{}' as UTF-8 text. Check file encoding or if it should be binary.",
+                      current_path.display()
+                   );
+            } else {
+              // Log other IO errors
+              error!("IO Error reading '{}': {}", current_path.display(), e);
+            }
+            // Propagate the original error
+            return Err(SpawnError::Io(e));
+          }
+        };
         let substituted_content = substitute_content(&content, all_substitutions, manifest);
         trace!(
           "Writing substituted file to: {}",
